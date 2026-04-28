@@ -22,6 +22,7 @@ function AppRoutes() {
       <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
       <Route path="/signup" element={<PublicRoute><Signup /></PublicRoute>} />
       <Route path="/app" element={<PrivateRoute><ChatApp /></PrivateRoute>} />
+      <Route path="/app/:roomId" element={<PrivateRoute><ChatApp /></PrivateRoute>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
