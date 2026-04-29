@@ -1,6 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI("AIzaSyC9MXYWOhYm5L7rXvPqj0denBXlYB2UzIA");
+const genAI = new GoogleGenerativeAI("AIzaSyBK1JBOKcZw314AFUxVclaNrMYMBjVoRaw");
 
 export async function askGemini(prompt, history = []) {
   try {
