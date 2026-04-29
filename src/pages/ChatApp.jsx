@@ -231,7 +231,7 @@ function VoiceCall({ roomId, user, onEnd }) {
         const roomName = `wetekie-${roomId}`;
         await call.join({
           url: `https://${DAILY_DOMAIN}.daily.co/${roomName}`,
-          token: undefined, // public room — no token needed
+          
           userName: user?.displayName || "Anonymous",
         });
 
@@ -241,7 +241,11 @@ function VoiceCall({ roomId, user, onEnd }) {
       }
     };
     init();
-    return () => { call?.leave(); call?.destroy(); };
+    return () => {
+  callRef.current?.leave();
+  callRef.current?.destroy();
+  callRef.current = null;
+};
   }, [roomId, user]);
 
   const toggleMute = () => {
