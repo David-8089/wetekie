@@ -244,14 +244,27 @@ function VoiceCall({ roomId, user, onEnd }) {
 
         // Join channel — roomId is used as channel name
         await client.join(AGORA_APP_ID, `wetekie-${roomId}`, null, null);
+localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+await client.publish([localTrack]);
+clientRef.current._localTrack = localTrack;
 
-        // Create and publish mic track
-        localTrack = await AgoraRTC.createMicrophoneAudioTrack();
-        await client.publish([localTrack]);
-        clientRef.current._localTrack = localTrack;
+setJoined(true);
 
-        setJoined(true);
-        setParticipants([{ uid: "me", name: user?.displayName || "You" }]);
+// ✅ Add yourself WITHOUT wiping remote users already joined
+setParticipants(prev => {
+  const alreadyMe = prev.find(p => p.uid === "me");
+  if (alreadyMe) return prev;
+  return [...prev, { uid: "me", name: user?.displayName || "You" }];
+});
+
+// ✅ Also grab any remote users already in the channel
+client.remoteUsers.forEach(remoteUser => {
+  setParticipants(prev => {
+    const exists = prev.find(p => p.uid === remoteUser.uid);
+    if (exists) return prev;
+    return [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
+  });
+});
       } catch (e) {
         setError(e.message || "Failed to join call");
       }
