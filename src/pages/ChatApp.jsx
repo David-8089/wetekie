@@ -537,29 +537,76 @@ export default function ChatApp() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mr = new MediaRecorder(stream);
-      mediaRecorderRef.current = mr; audioChunksRef.current = [];
-      mr.ondataavailable = e => audioChunksRef.current.push(e.data);
+
+      // Pick a MIME type that the browser actually supports
+      const mimeType = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+        "audio/mp4",
+        "",
+      ].find(t => t === "" || MediaRecorder.isTypeSupported(t));
+
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      mediaRecorderRef.current = mr;
+      audioChunksRef.current = [];
+
+      mr.ondataavailable = e => {
+        if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+
+        const chunks = audioChunksRef.current;
+        if (!chunks.length || chunks.every(c => c.size === 0)) {
+          alert("Recording was empty. Please try again and speak into the mic.");
+          setUploading(false);
+          return;
+        }
+
+        const blob = new Blob(chunks, { type: mr.mimeType || "audio/webm" });
+
+        if (blob.size < 1000) {
+          alert("Recording too short or empty. Please hold the button and speak.");
+          return;
+        }
+
+        // Pick extension based on actual MIME type
+        const ext = mr.mimeType?.includes("mp4") ? "mp4"
+          : mr.mimeType?.includes("ogg") ? "ogg"
+          : "webm";
+
         setUploading(true); setUploadProgress(0);
         try {
-          const { url } = await uploadToCloudinary(blob, `voice_${Date.now()}.webm`, setUploadProgress);
+          const { url } = await uploadToCloudinary(blob, `voice_${Date.now()}.${ext}`, setUploadProgress);
           await saveMessage({ type: "audio", text: "Voice message", fileUrl: url, fileName: "Voice message" });
-        } catch (err) { alert(`Audio upload failed: ${err.message}`); }
+        } catch (err) {
+          alert(`Audio upload failed: ${err.message}`);
+        }
         setUploading(false); setUploadProgress(0);
       };
-      mr.start(); setRecording(true); setRecSeconds(0);
+
+      // Request data every 250ms to avoid empty chunks on mobile
+      mr.start(250);
+      setRecording(true); setRecSeconds(0);
       recTimerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
-    } catch { alert("Microphone access denied."); }
+    } catch (err) {
+      alert("Microphone access denied. Please allow mic access in your browser settings.");
+    }
   };
-  const stopRecording   = () => { mediaRecorderRef.current?.stop(); clearInterval(recTimerRef.current); setRecording(false); setRecSeconds(0); };
+  const stopRecording = () => {
+    if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
+    clearInterval(recTimerRef.current); setRecording(false); setRecSeconds(0);
+  };
   const cancelRecording = () => {
-    if (mediaRecorderRef.current?.state !== "inactive") {
-      mediaRecorderRef.current.ondataavailable = null;
-      mediaRecorderRef.current.onstop = null;
-      mediaRecorderRef.current?.stop();
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") {
+      mr.ondataavailable = null;
+      mr.onstop = null;
+      mr.stop();
+      mr.stream?.getTracks().forEach(t => t.stop());
     }
     clearInterval(recTimerRef.current); setRecording(false); setRecSeconds(0);
   };
