@@ -216,6 +216,11 @@ function VoiceCall({ roomId, user, onEnd }) {
   useEffect(() => {
     let call;
     const init = async () => {
+      if (callRef.current) {
+  callRef.current.leave();
+  callRef.current.destroy();
+  callRef.current = null;
+}
       try {
         // Dynamically import Daily to avoid SSR issues
         const DailyIframe = (await import("@daily-co/daily-js")).default;
