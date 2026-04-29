@@ -226,13 +226,28 @@ function VoiceCall({ roomId, user, onEnd }) {
 
         // Track remote users
         client.on("user-published", async (remoteUser, mediaType) => {
-          await client.subscribe(remoteUser, mediaType);
-          if (mediaType === "audio") remoteUser.audioTrack?.play();
-          setParticipants(prev => {
-            const exists = prev.find(p => p.uid === remoteUser.uid);
-            return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
-          });
-        });
+  console.log("Remote user published:", remoteUser.uid, mediaType);
+  await client.subscribe(remoteUser, mediaType);
+  console.log("Subscribed. Audio track:", remoteUser.audioTrack);
+  if (mediaType === "audio") {
+    const audioTrack = remoteUser.audioTrack;
+    if (audioTrack) {
+      audioTrack.play();
+    }
+  }
+  setParticipants(prev => {
+    const exists = prev.find(p => p.uid === remoteUser.uid);
+    return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
+  });
+});
+
+// ✅ Subscribe to audio of users already in channel
+for (const remoteUser of client.remoteUsers) {
+  if (remoteUser.hasAudio) {
+    await client.subscribe(remoteUser, "audio");
+    remoteUser.audioTrack?.play();
+  }
+}
 
         client.on("user-unpublished", (remoteUser) => {
           setParticipants(prev => prev.filter(p => p.uid !== remoteUser.uid));
