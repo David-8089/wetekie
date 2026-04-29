@@ -9,9 +9,11 @@ import {
 } from "firebase/firestore";
 import "./App.css";
 
-const CLOUD_NAME   = "dsmeocmcx";
+const CLOUD_NAME    = "dsmeocmcx";
 const UPLOAD_PRESET = "wetekie";
 const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`;
+const DAILY_DOMAIN  = "wetekie";  // your Daily.co subdomain
+const DAILY_API_KEY = "7166bf0788438e9f3200bc55c69a1fef0ac58735576f81939ab1aa975c0a2311";
 
 const DEFAULT_ROOMS = [
   { id: "general",        name: "general",        emoji: "💬" },
@@ -203,6 +205,120 @@ function ImageMessage({ src, fileName, onClick }) {
   );
 }
 
+// ── VOICE CALL COMPONENT ─────────────────────────
+function VoiceCall({ roomId, user, onEnd }) {
+  const callRef     = useRef(null);
+  const [muted, setMuted]           = useState(false);
+  const [joined, setJoined]         = useState(false);
+  const [participants, setParticipants] = useState([]);
+  const [error, setError]           = useState("");
+
+  useEffect(() => {
+    let call;
+    const init = async () => {
+      try {
+        // Dynamically import Daily to avoid SSR issues
+        const DailyIframe = (await import("@daily-co/daily-js")).default;
+        call = DailyIframe.createCallObject({ audioSource: true, videoSource: false });
+        callRef.current = call;
+
+        call.on("joined-meeting", () => setJoined(true));
+        call.on("participant-joined", () => setParticipants(Object.values(call.participants())));
+        call.on("participant-left",   () => setParticipants(Object.values(call.participants())));
+        call.on("error", e => setError(e.errorMsg || "Call error"));
+
+        // Each room gets its own Daily room named after the Wetekie room
+        const roomName = `wetekie-${roomId}`;
+        await call.join({
+          url: `https://${DAILY_DOMAIN}.daily.co/${roomName}`,
+          token: undefined, // public room — no token needed
+          userName: user?.displayName || "Anonymous",
+        });
+
+        setParticipants(Object.values(call.participants()));
+      } catch (e) {
+        setError(e.message || "Failed to join call");
+      }
+    };
+    init();
+    return () => { call?.leave(); call?.destroy(); };
+  }, [roomId, user]);
+
+  const toggleMute = () => {
+    const call = callRef.current;
+    if (!call) return;
+    if (muted) { call.setLocalAudio(true); setMuted(false); }
+    else        { call.setLocalAudio(false); setMuted(true); }
+  };
+
+  const handleEnd = () => {
+    callRef.current?.leave();
+    callRef.current?.destroy();
+    onEnd();
+  };
+
+  return (
+    <div className="voice-call">
+      <div className="vc-header">
+        <span className="vc-pulse" />
+        <span className="vc-title">Voice call · #{roomId}</span>
+        <span className="vc-count">{participants.length} in call</span>
+      </div>
+
+      {error && <div className="vc-error">{error}</div>}
+
+      <div className="vc-participants">
+        {participants.map(p => {
+          const [pbg, pfg] = getAvatarColor(p.user_name);
+          return (
+            <div key={p.session_id} className="vc-participant">
+              <div className="vc-av" style={{ background: pbg, color: pfg }}>
+                {getInitials(p.user_name)}
+                {!p.audio && <span className="vc-muted-icon">🔇</span>}
+              </div>
+              <span className="vc-name">{p.user_name || "Anonymous"}</span>
+            </div>
+          );
+        })}
+        {!joined && !error && (
+          <div className="vc-connecting">
+            <span className="spin" style={{ fontSize: 18 }}>◌</span>
+            <span>Connecting...</span>
+          </div>
+        )}
+      </div>
+
+      <div className="vc-controls">
+        <button className={`vc-btn${muted ? " muted" : ""}`} onClick={toggleMute} title={muted ? "Unmute" : "Mute"}>
+          {muted
+            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            : <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          }
+          <span>{muted ? "Unmute" : "Mute"}</span>
+        </button>
+        <button className="vc-btn vc-end" onClick={handleEnd} title="Leave call">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.19 19.79 19.79 0 01.36 10.6 2 2 0 012 8.72V5.91a2 2 0 011.72-2 12.84 12.84 0 002.81-.7 2 2 0 012.11.45l1.27 1.27a16 16 0 002.6 3.41z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" transform="rotate(135 12 12)"/></svg>
+          <span>Leave</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── CALL BANNER (shown to others when a call is active) ───
+function CallBanner({ callData, onJoin }) {
+  return (
+    <div className="call-banner">
+      <span className="vc-pulse" />
+      <span className="cb-text"><strong>{callData.startedBy}</strong> started a voice call</span>
+      <button className="cb-join" onClick={onJoin}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        Join call
+      </button>
+    </div>
+  );
+}
+
 // ── MAIN COMPONENT ────────────────────────────────
 export default function ChatApp() {
   const { user, logout }   = useAuth();
@@ -230,6 +346,9 @@ export default function ChatApp() {
   // Recording
   const [recording, setRecording]       = useState(false);
   const [recSeconds, setRecSeconds]     = useState(0);
+  // Voice call
+  const [inCall, setInCall]             = useState(false);
+  const [activeCall, setActiveCall]     = useState(null); // Firestore call data
   // Search
   const [roomSearch, setRoomSearch]     = useState("");
   const [msgSearch, setMsgSearch]       = useState("");
@@ -350,6 +469,16 @@ export default function ChatApp() {
     return unsub;
   }, []);
 
+  // Listen for active call in current room
+  useEffect(() => {
+    if (!activeRoom) return;
+    const unsub = onSnapshot(doc(db, "calls", activeRoom), snap => {
+      if (snap.exists()) setActiveCall(snap.data());
+      else { setActiveCall(null); setInCall(false); }
+    });
+    return unsub;
+  }, [activeRoom]);
+
   useEffect(() => { if (editingId) editRef.current?.focus(); }, [editingId]);
   useEffect(() => { if (showMsgSearch) msgSearchRef.current?.focus(); }, [showMsgSearch]);
 
@@ -467,6 +596,29 @@ export default function ChatApp() {
     });
   };
 
+  // Voice call handlers
+  const startCall = async () => {
+    try {
+      await setDoc(doc(db, "calls", activeRoom), {
+        roomId: activeRoom,
+        startedBy: user.displayName || "Someone",
+        startedAt: serverTimestamp(),
+        active: true,
+      });
+      setInCall(true);
+    } catch (e) { alert("Failed to start call: " + e.message); }
+  };
+
+  const joinCall  = () => setInCall(true);
+
+  const endCall   = async () => {
+    setInCall(false);
+    // Only delete if you started it
+    if (activeCall?.startedBy === user.displayName) {
+      try { await deleteDoc(doc(db, "calls", activeRoom)); } catch {}
+    }
+  };
+
   const handleLogout = async () => { await logout(); nav("/"); };
   const totalUnread  = Object.values(unread).reduce((a, b) => a + b, 0);
   const [bg, fg]     = getAvatarColor(user?.displayName || user?.email || "A");
@@ -559,6 +711,12 @@ export default function ChatApp() {
             <button className="ch-icon-btn" onClick={handleShareLink} title="Copy room link">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
+            {/* Voice call button */}
+            {!inCall && (
+              <button className={`ch-icon-btn${activeCall ? " ch-call-active" : ""}`} onClick={activeCall ? joinCall : startCall} title={activeCall ? "Join call" : "Start voice call"}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            )}
             <span className="ch-ai-badge">✦ @gemini</span>
             <span className="ch-online">{onlineUsers.length} online</span>
           </div>
@@ -594,6 +752,16 @@ export default function ChatApp() {
         {/* AI limit / link toast */}
         {aiLimitMsg && <div className="ai-limit-toast">{aiLimitMsg}</div>}
         {linkToast   && <div className="link-toast">{linkToast}</div>}
+
+        {/* Active call banner — shown to users not yet in call */}
+        {activeCall && !inCall && (
+          <CallBanner callData={activeCall} onJoin={joinCall} />
+        )}
+
+        {/* Voice call panel */}
+        {inCall && (
+          <VoiceCall roomId={activeRoom} user={user} onEnd={endCall} />
+        )}
 
         {/* Messages */}
         <div className="messages-area">
