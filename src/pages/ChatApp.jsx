@@ -12,8 +12,7 @@ import "./App.css";
 const CLOUD_NAME    = "dsmeocmcx";
 const UPLOAD_PRESET = "wetekie";
 const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`;
-const DAILY_DOMAIN  = "wetekie";  // your Daily.co subdomain
-const DAILY_API_KEY = "7166bf0788438e9f3200bc55c69a1fef0ac58735576f81939ab1aa975c0a2311";
+
 
 const DEFAULT_ROOMS = [
   { id: "general",        name: "general",        emoji: "💬" },
@@ -207,62 +206,75 @@ function ImageMessage({ src, fileName, onClick }) {
 
 // ── VOICE CALL COMPONENT ─────────────────────────
 function VoiceCall({ roomId, user, onEnd }) {
-  const callRef     = useRef(null);
+  const clientRef    = useRef(null);
   const [muted, setMuted]           = useState(false);
   const [joined, setJoined]         = useState(false);
   const [participants, setParticipants] = useState([]);
   const [error, setError]           = useState("");
 
+  const AGORA_APP_ID = "8bddc0535baf4797be62747203cb2b8c"; // 👈 paste your App ID here
+
   useEffect(() => {
-    let call;
+    let localTrack;
     const init = async () => {
-      if (callRef.current) {
-  callRef.current.leave();
-  callRef.current.destroy();
-  callRef.current = null;
-}
       try {
-        // Dynamically import Daily to avoid SSR issues
-        const DailyIframe = (await import("@daily-co/daily-js")).default;
-        call = DailyIframe.createCallObject({ audioSource: true, videoSource: false });
-        callRef.current = call;
+        const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
+        AgoraRTC.setLogLevel(4); // suppress logs
 
-        call.on("joined-meeting", () => setJoined(true));
-        call.on("participant-joined", () => setParticipants(Object.values(call.participants())));
-        call.on("participant-left",   () => setParticipants(Object.values(call.participants())));
-        call.on("error", e => setError(e.errorMsg || "Call error"));
+        const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+        clientRef.current = client;
 
-        // Each room gets its own Daily room named after the Wetekie room
-        const roomName = `wetekie-${roomId}`;
-        await call.join({
-          url: `https://${DAILY_DOMAIN}.daily.co/${roomName}`,
-          
-          userName: user?.displayName || "Anonymous",
+        // Track remote users
+        client.on("user-published", async (remoteUser, mediaType) => {
+          await client.subscribe(remoteUser, mediaType);
+          if (mediaType === "audio") remoteUser.audioTrack?.play();
+          setParticipants(prev => {
+            const exists = prev.find(p => p.uid === remoteUser.uid);
+            return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
+          });
         });
 
-        setParticipants(Object.values(call.participants()));
+        client.on("user-unpublished", (remoteUser) => {
+          setParticipants(prev => prev.filter(p => p.uid !== remoteUser.uid));
+        });
+
+        client.on("user-left", (remoteUser) => {
+          setParticipants(prev => prev.filter(p => p.uid !== remoteUser.uid));
+        });
+
+        // Join channel — roomId is used as channel name
+        await client.join(AGORA_APP_ID, `wetekie-${roomId}`, null, null);
+
+        // Create and publish mic track
+        localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        await client.publish([localTrack]);
+        clientRef.current._localTrack = localTrack;
+
+        setJoined(true);
+        setParticipants([{ uid: "me", name: user?.displayName || "You" }]);
       } catch (e) {
         setError(e.message || "Failed to join call");
       }
     };
     init();
     return () => {
-  callRef.current?.leave();
-  callRef.current?.destroy();
-  callRef.current = null;
-};
+      clientRef.current?._localTrack?.close();
+      clientRef.current?.leave();
+      clientRef.current = null;
+    };
   }, [roomId, user]);
 
   const toggleMute = () => {
-    const call = callRef.current;
-    if (!call) return;
-    if (muted) { call.setLocalAudio(true); setMuted(false); }
-    else        { call.setLocalAudio(false); setMuted(true); }
+    const track = clientRef.current?._localTrack;
+    if (!track) return;
+    if (muted) { track.setEnabled(true); setMuted(false); }
+    else        { track.setEnabled(false); setMuted(true); }
   };
 
-  const handleEnd = () => {
-    callRef.current?.leave();
-    callRef.current?.destroy();
+  const handleEnd = async () => {
+    clientRef.current?._localTrack?.close();
+    await clientRef.current?.leave();
+    clientRef.current = null;
     onEnd();
   };
 
@@ -278,14 +290,13 @@ function VoiceCall({ roomId, user, onEnd }) {
 
       <div className="vc-participants">
         {participants.map(p => {
-          const [pbg, pfg] = getAvatarColor(p.user_name);
+          const [pbg, pfg] = getAvatarColor(p.name);
           return (
-            <div key={p.session_id} className="vc-participant">
+            <div key={p.uid} className="vc-participant">
               <div className="vc-av" style={{ background: pbg, color: pfg }}>
-                {getInitials(p.user_name)}
-                {!p.audio && <span className="vc-muted-icon">🔇</span>}
+                {getInitials(p.name)}
               </div>
-              <span className="vc-name">{p.user_name || "Anonymous"}</span>
+              <span className="vc-name">{p.name}</span>
             </div>
           );
         })}
@@ -298,14 +309,14 @@ function VoiceCall({ roomId, user, onEnd }) {
       </div>
 
       <div className="vc-controls">
-        <button className={`vc-btn${muted ? " muted" : ""}`} onClick={toggleMute} title={muted ? "Unmute" : "Mute"}>
+        <button className={`vc-btn${muted ? " muted" : ""}`} onClick={toggleMute}>
           {muted
             ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M9 9v3a3 3 0 005.12 2.12M15 9.34V4a3 3 0 00-5.94-.6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M17 16.95A7 7 0 015 12v-2m14 0v2a7 7 0 01-.11 1.23M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             : <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
           }
           <span>{muted ? "Unmute" : "Mute"}</span>
         </button>
-        <button className="vc-btn vc-end" onClick={handleEnd} title="Leave call">
+        <button className="vc-btn vc-end" onClick={handleEnd}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M10.68 13.31a16 16 0 003.41 2.6l1.27-1.27a2 2 0 012.11-.45 12.84 12.84 0 002.81.7 2 2 0 011.72 2v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.42 19.42 0 013.43 9.19 19.79 19.79 0 01.36 10.6 2 2 0 012 8.72V5.91a2 2 0 011.72-2 12.84 12.84 0 002.81-.7 2 2 0 012.11.45l1.27 1.27a16 16 0 002.6 3.41z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" transform="rotate(135 12 12)"/></svg>
           <span>Leave</span>
         </button>
