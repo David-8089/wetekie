@@ -9,10 +9,10 @@ import {
 } from "firebase/firestore";
 import "./App.css";
 
-const CLOUD_NAME    = "dsmeocmcx";
-const UPLOAD_PRESET = "wetekie";
+const CLOUD_NAME     = "dsmeocmcx";
+const UPLOAD_PRESET  = "wetekie";
 const CLOUDINARY_URL = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/auto/upload`;
-
+const AGORA_APP_ID   = "8bddc0535baf4797be62747203cb2b8c";
 
 const DEFAULT_ROOMS = [
   { id: "general",        name: "general",        emoji: "💬" },
@@ -104,7 +104,9 @@ async function uploadToCloudinary(fileOrBlob, filename, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", CLOUDINARY_URL);
-    xhr.upload.onprogress = e => { if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
     xhr.onload = () => {
       if (xhr.status === 200) { const r = JSON.parse(xhr.responseText); resolve({ url: r.secure_url }); }
       else reject(new Error(`Cloudinary error: ${xhr.status} ${xhr.responseText}`));
@@ -116,7 +118,7 @@ async function uploadToCloudinary(fileOrBlob, filename, onProgress) {
 
 // ── WHATSAPP AUDIO PLAYER ─────────────────────────
 function AudioPlayer({ src, isMe }) {
-  const audioRef  = useRef(null);
+  const audioRef = useRef(null);
   const [playing, setPlaying]   = useState(false);
   const [current, setCurrent]   = useState(0);
   const [duration, setDuration] = useState(0);
@@ -134,7 +136,7 @@ function AudioPlayer({ src, isMe }) {
     else { a.play(); setPlaying(true); }
   };
 
-  const progress = duration ? current / duration : 0;
+  const progress   = duration ? current / duration : 0;
   const filledBars = Math.floor(progress * BAR_COUNT);
 
   return (
@@ -156,11 +158,7 @@ function AudioPlayer({ src, isMe }) {
       </button>
       <div className="wa-bars">
         {bars.map((h, i) => (
-          <div
-            key={i}
-            className={`wa-bar${i < filledBars ? " filled" : ""}`}
-            style={{ height: `${h}%` }}
-          />
+          <div key={i} className={`wa-bar${i < filledBars ? " filled" : ""}`} style={{ height: `${h}%` }} />
         ))}
       </div>
       <span className="wa-time">
@@ -187,11 +185,7 @@ function ImageMessage({ src, fileName, onClick }) {
   };
 
   return (
-    <div
-      className="img-wrap"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
+    <div className="img-wrap" onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       <img src={src} alt={fileName} className="msg-img" onClick={onClick} />
       {hovered && (
         <button className="img-download-btn" onClick={handleDownload} title="Download image">
@@ -204,50 +198,32 @@ function ImageMessage({ src, fileName, onClick }) {
   );
 }
 
-// ── VOICE CALL COMPONENT ─────────────────────────
+// ── AGORA VOICE CALL ──────────────────────────────
 function VoiceCall({ roomId, user, onEnd }) {
-  const clientRef    = useRef(null);
-  const [muted, setMuted]           = useState(false);
-  const [joined, setJoined]         = useState(false);
+  const clientRef = useRef(null);
+  const [muted, setMuted]               = useState(false);
+  const [joined, setJoined]             = useState(false);
   const [participants, setParticipants] = useState([]);
-  const [error, setError]           = useState("");
-
-  const AGORA_APP_ID = "8bddc0535baf4797be62747203cb2b8c"; // 👈 paste your App ID here
+  const [error, setError]               = useState("");
 
   useEffect(() => {
     let localTrack;
     const init = async () => {
       try {
         const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
-        AgoraRTC.setLogLevel(4); // suppress logs
+        AgoraRTC.setLogLevel(4);
 
         const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
         clientRef.current = client;
 
-        // Track remote users
         client.on("user-published", async (remoteUser, mediaType) => {
-  console.log("Remote user published:", remoteUser.uid, mediaType);
-  await client.subscribe(remoteUser, mediaType);
-  console.log("Subscribed. Audio track:", remoteUser.audioTrack);
-  if (mediaType === "audio") {
-    const audioTrack = remoteUser.audioTrack;
-    if (audioTrack) {
-      audioTrack.play();
-    }
-  }
-  setParticipants(prev => {
-    const exists = prev.find(p => p.uid === remoteUser.uid);
-    return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
-  });
-});
-
-// ✅ Subscribe to audio of users already in channel
-for (const remoteUser of client.remoteUsers) {
-  if (remoteUser.hasAudio) {
-    await client.subscribe(remoteUser, "audio");
-    remoteUser.audioTrack?.play();
-  }
-}
+          await client.subscribe(remoteUser, mediaType);
+          if (mediaType === "audio") remoteUser.audioTrack?.play();
+          setParticipants(prev => {
+            const exists = prev.find(p => p.uid === remoteUser.uid);
+            return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${String(remoteUser.uid).slice(-4)}` }];
+          });
+        });
 
         client.on("user-unpublished", (remoteUser) => {
           setParticipants(prev => prev.filter(p => p.uid !== remoteUser.uid));
@@ -257,33 +233,34 @@ for (const remoteUser of client.remoteUsers) {
           setParticipants(prev => prev.filter(p => p.uid !== remoteUser.uid));
         });
 
-        // Join channel — roomId is used as channel name
         await client.join(AGORA_APP_ID, `wetekie-${roomId}`, null, null);
-localTrack = await AgoraRTC.createMicrophoneAudioTrack();
-await client.publish([localTrack]);
-clientRef.current._localTrack = localTrack;
 
-setJoined(true);
+        // Subscribe to anyone already in channel
+        for (const remoteUser of client.remoteUsers) {
+          if (remoteUser.hasAudio) {
+            await client.subscribe(remoteUser, "audio");
+            remoteUser.audioTrack?.play();
+            setParticipants(prev => {
+              const exists = prev.find(p => p.uid === remoteUser.uid);
+              return exists ? prev : [...prev, { uid: remoteUser.uid, name: `User ${String(remoteUser.uid).slice(-4)}` }];
+            });
+          }
+        }
 
-// ✅ Add yourself WITHOUT wiping remote users already joined
-setParticipants(prev => {
-  const alreadyMe = prev.find(p => p.uid === "me");
-  if (alreadyMe) return prev;
-  return [...prev, { uid: "me", name: user?.displayName || "You" }];
-});
+        localTrack = await AgoraRTC.createMicrophoneAudioTrack();
+        await client.publish([localTrack]);
+        clientRef.current._localTrack = localTrack;
 
-// ✅ Also grab any remote users already in the channel
-client.remoteUsers.forEach(remoteUser => {
-  setParticipants(prev => {
-    const exists = prev.find(p => p.uid === remoteUser.uid);
-    if (exists) return prev;
-    return [...prev, { uid: remoteUser.uid, name: `User ${remoteUser.uid}` }];
-  });
-});
+        setJoined(true);
+        setParticipants(prev => {
+          const exists = prev.find(p => p.uid === "me");
+          return exists ? prev : [...prev, { uid: "me", name: user?.displayName || "You" }];
+        });
       } catch (e) {
-        setError(e.message || "Failed to join call");
+        setError(e.message || "Failed to join call. Check mic permissions.");
       }
     };
+
     init();
     return () => {
       clientRef.current?._localTrack?.close();
@@ -295,8 +272,8 @@ client.remoteUsers.forEach(remoteUser => {
   const toggleMute = () => {
     const track = clientRef.current?._localTrack;
     if (!track) return;
-    if (muted) { track.setEnabled(true); setMuted(false); }
-    else        { track.setEnabled(false); setMuted(true); }
+    track.setEnabled(muted);
+    setMuted(!muted);
   };
 
   const handleEnd = async () => {
@@ -323,6 +300,7 @@ client.remoteUsers.forEach(remoteUser => {
             <div key={p.uid} className="vc-participant">
               <div className="vc-av" style={{ background: pbg, color: pfg }}>
                 {getInitials(p.name)}
+                {p.uid === "me" && muted && <span className="vc-muted-icon">🔇</span>}
               </div>
               <span className="vc-name">{p.name}</span>
             </div>
@@ -353,7 +331,7 @@ client.remoteUsers.forEach(remoteUser => {
   );
 }
 
-// ── CALL BANNER (shown to others when a call is active) ───
+// ── CALL BANNER ───────────────────────────────────
 function CallBanner({ callData, onJoin }) {
   return (
     <div className="call-banner">
@@ -369,8 +347,8 @@ function CallBanner({ callData, onJoin }) {
 
 // ── MAIN COMPONENT ────────────────────────────────
 export default function ChatApp() {
-  const { user, logout }   = useAuth();
-  const nav                = useNavigate();
+  const { user, logout }    = useAuth();
+  const nav                 = useNavigate();
   const { roomId: urlRoom } = useParams();
 
   const [rooms, setRooms]               = useState(DEFAULT_ROOMS);
@@ -391,17 +369,13 @@ export default function ChatApp() {
   const [editText, setEditText]         = useState("");
   const [hoveredId, setHoveredId]       = useState(null);
   const [aiLimitMsg, setAiLimitMsg]     = useState("");
-  // Recording
   const [recording, setRecording]       = useState(false);
   const [recSeconds, setRecSeconds]     = useState(0);
-  // Voice call
   const [inCall, setInCall]             = useState(false);
-  const [activeCall, setActiveCall]     = useState(null); // Firestore call data
-  // Search
+  const [activeCall, setActiveCall]     = useState(null);
   const [roomSearch, setRoomSearch]     = useState("");
   const [msgSearch, setMsgSearch]       = useState("");
   const [showMsgSearch, setShowMsgSearch] = useState(false);
-  // Link copy toast
   const [linkToast, setLinkToast]       = useState("");
 
   const mediaRecorderRef = useRef(null);
@@ -416,13 +390,8 @@ export default function ChatApp() {
 
   const isMobile = () => window.innerWidth <= 768;
 
-  // Sync URL room param on mount
-  useEffect(() => {
-    if (urlRoom) setActiveRoom(urlRoom);
-  }, [urlRoom]);
-
+  useEffect(() => { if (urlRoom) setActiveRoom(urlRoom); }, [urlRoom]);
   useEffect(() => { requestNotifPermission(); }, []);
-
   useEffect(() => {
     const stored = JSON.parse(localStorage.getItem("wetekie_lastseen") || "{}");
     setLastSeen(stored);
@@ -442,15 +411,13 @@ export default function ChatApp() {
     setActiveRoom(roomId);
     markRoomSeen(roomId);
     nav(`/app/${roomId}`, { replace: true });
-    setMsgSearch("");
-    setShowMsgSearch(false);
+    setMsgSearch(""); setShowMsgSearch(false);
     if (isMobile()) setSidebarOpen(false);
   };
 
   // Unread notifications
   useEffect(() => {
-    const unsubs = [];
-    const isFirst = {};
+    const unsubs = [], isFirst = {};
     rooms.forEach(room => {
       isFirst[room.id] = true;
       const q = query(collection(db, "rooms", room.id, "messages"), orderBy("createdAt"));
@@ -482,18 +449,17 @@ export default function ChatApp() {
     if (!user) return;
     const uid = user.uid, name = user.displayName;
     setDoc(doc(db, "presence", uid), { uid, name, online: true, lastSeen: serverTimestamp() })
-      .catch(e => console.warn("Presence error:", e.message));
+      .catch(e => console.warn("Presence:", e.message));
     const unsub = onSnapshot(collection(db, "presence"), snap => {
       setOnlineUsers(snap.docs.map(d => d.data()).filter(u => u.online));
     });
     return () => {
-      setDoc(doc(db, "presence", uid), { uid, name, online: false, lastSeen: serverTimestamp() })
-        .catch(() => {});
+      setDoc(doc(db, "presence", uid), { uid, name, online: false, lastSeen: serverTimestamp() }).catch(() => {});
       unsub();
     };
   }, [user]);
 
-  // Messages listener
+  // Messages
   useEffect(() => {
     if (!activeRoom) return;
     markRoomSeen(activeRoom);
@@ -517,7 +483,7 @@ export default function ChatApp() {
     return unsub;
   }, []);
 
-  // Listen for active call in current room
+  // Active call listener
   useEffect(() => {
     if (!activeRoom) return;
     const unsub = onSnapshot(doc(db, "calls", activeRoom), snap => {
@@ -530,11 +496,8 @@ export default function ChatApp() {
   useEffect(() => { if (editingId) editRef.current?.focus(); }, [editingId]);
   useEffect(() => { if (showMsgSearch) msgSearchRef.current?.focus(); }, [showMsgSearch]);
 
-  // Filtered data
-  const filteredRooms = rooms.filter(r => r.name.toLowerCase().includes(roomSearch.toLowerCase()));
-  const filteredMessages = msgSearch.trim()
-    ? messages.filter(m => m.text?.toLowerCase().includes(msgSearch.toLowerCase()))
-    : messages;
+  const filteredRooms    = rooms.filter(r => r.name.toLowerCase().includes(roomSearch.toLowerCase()));
+  const filteredMessages = msgSearch.trim() ? messages.filter(m => m.text?.toLowerCase().includes(msgSearch.toLowerCase())) : messages;
 
   const saveMessage = async (data) => {
     try {
@@ -542,7 +505,7 @@ export default function ChatApp() {
         uid: user.uid, displayName: user.displayName || "Anonymous",
         createdAt: serverTimestamp(), edited: false, ...data,
       });
-    } catch (e) { console.error("saveMessage failed:", e.message); alert("Failed to send. Check connection."); }
+    } catch (e) { console.error("saveMessage:", e.message); alert("Failed to send. Check connection."); }
   };
 
   const handleSend = async () => {
@@ -563,7 +526,7 @@ export default function ChatApp() {
           text: reply, uid: user.uid, senderType: "ai",
           displayName: "Gemini AI", type: "ai", createdAt: serverTimestamp(),
         });
-      } catch (e) { console.error("Gemini save failed:", e.message); }
+      } catch (e) { console.error("Gemini save:", e.message); }
       if (remaining <= 5) { setAiLimitMsg(`⚠️ @gemini: ${remaining} call${remaining !== 1 ? "s" : ""} left today.`); setTimeout(() => setAiLimitMsg(""), 5000); }
     }
   };
@@ -585,79 +548,51 @@ export default function ChatApp() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      // Pick best supported MIME type
       const mimeType = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/ogg;codecs=opus",
-        "audio/mp4",
+        "audio/webm;codecs=opus", "audio/webm",
+        "audio/ogg;codecs=opus",  "audio/mp4",
       ].find(t => MediaRecorder.isTypeSupported(t)) || "";
 
-      const options = mimeType ? { mimeType } : {};
-      const mr = new MediaRecorder(stream, options);
+      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : {});
       mediaRecorderRef.current = mr;
-      audioChunksRef.current = [];
+      audioChunksRef.current   = [];
 
-      mr.ondataavailable = e => {
-        if (e.data && e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-        }
-      };
+      mr.ondataavailable = e => { if (e.data && e.data.size > 0) audioChunksRef.current.push(e.data); };
 
       mr.onstop = async () => {
         stream.getTracks().forEach(t => t.stop());
-
-        const chunks = audioChunksRef.current;
-        const totalSize = chunks.reduce((sum, c) => sum + c.size, 0);
-
+        const chunks    = audioChunksRef.current;
+        const totalSize = chunks.reduce((s, c) => s + c.size, 0);
         if (!chunks.length || totalSize === 0) {
-          alert("Recording failed — no audio captured. Please check microphone permissions.");
-          setUploading(false);
-          return;
+          alert("No audio captured. Check mic permissions.");
+          setUploading(false); return;
         }
-
         const actualMime = mr.mimeType || mimeType || "audio/webm";
         const blob = new Blob(chunks, { type: actualMime });
-        const ext  = actualMime.includes("mp4") ? "mp4"
-                   : actualMime.includes("ogg") ? "ogg"
-                   : "webm";
-
-        setUploading(true);
-        setUploadProgress(0);
+        const ext  = actualMime.includes("mp4") ? "mp4" : actualMime.includes("ogg") ? "ogg" : "webm";
+        setUploading(true); setUploadProgress(0);
         try {
-          const { url } = await uploadToCloudinary(
-            blob, `voice_${Date.now()}.${ext}`, setUploadProgress
-          );
-          await saveMessage({
-            type: "audio", text: "Voice message",
-            fileUrl: url, fileName: "Voice message",
-          });
-        } catch (err) {
-          alert(`Audio upload failed: ${err.message}`);
-        }
-        setUploading(false);
-        setUploadProgress(0);
+          const { url } = await uploadToCloudinary(blob, `voice_${Date.now()}.${ext}`, setUploadProgress);
+          await saveMessage({ type: "audio", text: "Voice message", fileUrl: url, fileName: "Voice message" });
+        } catch (err) { alert(`Audio upload failed: ${err.message}`); }
+        setUploading(false); setUploadProgress(0);
       };
 
-      mr.start(); // No timeslice — collect all in one chunk on stop
-      setRecording(true);
-      setRecSeconds(0);
+      mr.start();
+      setRecording(true); setRecSeconds(0);
       recTimerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
-    } catch (err) {
-      alert("Microphone access denied. Please allow mic access and try again.");
-    }
+    } catch { alert("Microphone access denied. Please allow mic access and try again."); }
   };
+
   const stopRecording = () => {
     if (mediaRecorderRef.current?.state === "recording") mediaRecorderRef.current.stop();
     clearInterval(recTimerRef.current); setRecording(false); setRecSeconds(0);
   };
+
   const cancelRecording = () => {
     const mr = mediaRecorderRef.current;
     if (mr && mr.state !== "inactive") {
-      mr.ondataavailable = null;
-      mr.onstop = null;
-      mr.stop();
+      mr.ondataavailable = null; mr.onstop = null; mr.stop();
       mr.stream?.getTracks().forEach(t => t.stop());
     }
     clearInterval(recTimerRef.current); setRecording(false); setRecSeconds(0);
@@ -669,53 +604,47 @@ export default function ChatApp() {
   const saveEdit   = async (msgId) => {
     if (!editText.trim()) return;
     try { await updateDoc(doc(db, "rooms", activeRoom, "messages", msgId), { text: editText.trim(), edited: true }); cancelEdit(); }
-    catch (e) { alert("Failed to edit."); }
+    catch { alert("Failed to edit."); }
   };
   const handleDelete = async (msgId) => {
     if (!window.confirm("Delete this message?")) return;
     try { await deleteDoc(doc(db, "rooms", activeRoom, "messages", msgId)); }
-    catch (e) { alert("Failed to delete."); }
+    catch { alert("Failed to delete."); }
   };
-  const canActOn = msg => msg.uid === user?.uid && !msg.senderType && msg.createdAt && (Date.now() - (msg.createdAt.toMillis?.() || 0)) < 5 * 60 * 1000;
+  const canActOn = msg => msg.uid === user?.uid && !msg.senderType && msg.createdAt &&
+    (Date.now() - (msg.createdAt.toMillis?.() || 0)) < 5 * 60 * 1000;
 
-  // Room creation
+  // Voice call
+  const startCall = async () => {
+    try {
+      await setDoc(doc(db, "calls", activeRoom), {
+        roomId: activeRoom, startedBy: user.displayName || "Someone",
+        startedAt: serverTimestamp(), active: true,
+      });
+      setInCall(true);
+    } catch (e) { alert("Failed to start call: " + e.message); }
+  };
+  const joinCall = () => setInCall(true);
+  const endCall  = async () => {
+    setInCall(false);
+    if (activeCall?.startedBy === user.displayName) {
+      try { await deleteDoc(doc(db, "calls", activeRoom)); } catch {}
+    }
+  };
+
+  // Room link
+  const handleShareLink = () => {
+    const link = `${window.location.origin}/app/${activeRoom}`;
+    navigator.clipboard.writeText(link).then(() => {
+      setLinkToast("🔗 Link copied!"); setTimeout(() => setLinkToast(""), 3000);
+    });
+  };
+
   const handleCreateRoom = async () => {
     const name = newRoomName.trim().toLowerCase().replace(/\s+/g, "-");
     if (!name) return;
     await setDoc(doc(db, "customRooms", name), { name });
     setNewRoomName(""); setShowNewRoom(false); switchRoom(name);
-  };
-
-  // Share room link
-  const handleShareLink = () => {
-    const link = `${window.location.origin}/app/${activeRoom}`;
-    navigator.clipboard.writeText(link).then(() => {
-      setLinkToast("🔗 Link copied!");
-      setTimeout(() => setLinkToast(""), 3000);
-    });
-  };
-
-  // Voice call handlers
-  const startCall = async () => {
-    try {
-      await setDoc(doc(db, "calls", activeRoom), {
-        roomId: activeRoom,
-        startedBy: user.displayName || "Someone",
-        startedAt: serverTimestamp(),
-        active: true,
-      });
-      setInCall(true);
-    } catch (e) { alert("Failed to start call: " + e.message); }
-  };
-
-  const joinCall  = () => setInCall(true);
-
-  const endCall   = async () => {
-    setInCall(false);
-    // Only delete if you started it
-    if (activeCall?.startedBy === user.displayName) {
-      try { await deleteDoc(doc(db, "calls", activeRoom)); } catch {}
-    }
   };
 
   const handleLogout = async () => { await logout(); nav("/"); };
@@ -726,24 +655,17 @@ export default function ChatApp() {
     <div className="chat-app page-fade">
       {sidebarOpen && isMobile() && <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />}
 
-      {/* ── SIDEBAR ── */}
+      {/* SIDEBAR */}
       <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
         <div className="sb-top">
           <div className="sb-brand">wete<em>kie</em></div>
           <button className="sb-close" onClick={() => setSidebarOpen(false)}>✕</button>
         </div>
-
-        {/* Room search */}
         <div className="sb-room-search">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/><path d="m21 21-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          <input
-            value={roomSearch}
-            onChange={e => setRoomSearch(e.target.value)}
-            placeholder="Search rooms..."
-          />
+          <input value={roomSearch} onChange={e => setRoomSearch(e.target.value)} placeholder="Search rooms..." />
           {roomSearch && <button onClick={() => setRoomSearch("")}>✕</button>}
         </div>
-
         <div className="sb-section-label">Rooms</div>
         {filteredRooms.map(r => {
           const count = unread[r.id] || 0;
@@ -756,7 +678,6 @@ export default function ChatApp() {
           );
         })}
         {filteredRooms.length === 0 && <div className="sb-no-results">No rooms found</div>}
-
         {showNewRoom ? (
           <div className="new-room-form">
             <input value={newRoomName} onChange={e => setNewRoomName(e.target.value)} placeholder="room-name" onKeyDown={e => e.key === "Enter" && handleCreateRoom()} autoFocus />
@@ -768,7 +689,6 @@ export default function ChatApp() {
         ) : (
           <button className="add-room-btn" onClick={() => setShowNewRoom(true)}>+ New room</button>
         )}
-
         <div className="sb-section-label" style={{ marginTop: 24 }}>Online — {onlineUsers.length}</div>
         {onlineUsers.map(u => {
           const [ubg, ufg] = getAvatarColor(u.name);
@@ -780,7 +700,6 @@ export default function ChatApp() {
             </div>
           );
         })}
-
         <div className="sb-user-row">
           <div className="sb-me-av" style={{ background: bg, color: fg }}>{getInitials(user?.displayName)}</div>
           <div className="sb-me-info">
@@ -791,7 +710,7 @@ export default function ChatApp() {
         </div>
       </aside>
 
-      {/* ── MAIN ── */}
+      {/* MAIN */}
       <main className="chat-main">
         <div className="chat-header">
           <div className="ch-left">
@@ -802,15 +721,12 @@ export default function ChatApp() {
             <div className="ch-room"><span className="ch-hash">#</span><span>{activeRoom}</span></div>
           </div>
           <div className="ch-right">
-            {/* Message search toggle */}
             <button className="ch-icon-btn" onClick={() => setShowMsgSearch(s => !s)} title="Search messages">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/><path d="m21 21-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
             </button>
-            {/* Share room link */}
             <button className="ch-icon-btn" onClick={handleShareLink} title="Copy room link">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
-            {/* Voice call button */}
             {!inCall && (
               <button className={`ch-icon-btn${activeCall ? " ch-call-active" : ""}`} onClick={activeCall ? joinCall : startCall} title={activeCall ? "Join call" : "Start voice call"}>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
@@ -821,26 +737,15 @@ export default function ChatApp() {
           </div>
         </div>
 
-        {/* Message search bar */}
         {showMsgSearch && (
           <div className="msg-search-bar">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="8" stroke="currentColor" strokeWidth="2"/><path d="m21 21-4.35-4.35" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-            <input
-              ref={msgSearchRef}
-              value={msgSearch}
-              onChange={e => setMsgSearch(e.target.value)}
-              placeholder={`Search in #${activeRoom}...`}
-            />
-            {msgSearch && (
-              <span className="msg-search-count">
-                {filteredMessages.length} result{filteredMessages.length !== 1 ? "s" : ""}
-              </span>
-            )}
+            <input ref={msgSearchRef} value={msgSearch} onChange={e => setMsgSearch(e.target.value)} placeholder={`Search in #${activeRoom}...`} />
+            {msgSearch && <span className="msg-search-count">{filteredMessages.length} result{filteredMessages.length !== 1 ? "s" : ""}</span>}
             <button onClick={() => { setMsgSearch(""); setShowMsgSearch(false); }}>✕</button>
           </div>
         )}
 
-        {/* Upload progress */}
         {uploading && (
           <div className="upload-bar">
             <div className="upload-fill" style={{ width: `${uploadProgress}%` }} />
@@ -848,21 +753,11 @@ export default function ChatApp() {
           </div>
         )}
 
-        {/* AI limit / link toast */}
         {aiLimitMsg && <div className="ai-limit-toast">{aiLimitMsg}</div>}
         {linkToast   && <div className="link-toast">{linkToast}</div>}
+        {activeCall && !inCall && <CallBanner callData={activeCall} onJoin={joinCall} />}
+        {inCall && <VoiceCall roomId={activeRoom} user={user} onEnd={endCall} />}
 
-        {/* Active call banner — shown to users not yet in call */}
-        {activeCall && !inCall && (
-          <CallBanner callData={activeCall} onJoin={joinCall} />
-        )}
-
-        {/* Voice call panel */}
-        {inCall && (
-          <VoiceCall roomId={activeRoom} user={user} onEnd={endCall} />
-        )}
-
-        {/* Messages */}
         <div className="messages-area">
           {filteredMessages.length === 0 && !msgSearch && (
             <div className="empty-state">
@@ -879,8 +774,8 @@ export default function ChatApp() {
           )}
 
           {filteredMessages.map(msg => {
-            const isAi  = msg.senderType === "ai" || msg.uid === "gemini-ai";
-            const isMe  = msg.uid === user?.uid && !isAi;
+            const isAi   = msg.senderType === "ai" || msg.uid === "gemini-ai";
+            const isMe   = msg.uid === user?.uid && !isAi;
             const canAct = canActOn(msg);
             const [mbg, mfg] = getAvatarColor(msg.displayName);
             const isEditing  = editingId === msg.id;
@@ -896,7 +791,6 @@ export default function ChatApp() {
                     {isAi ? "✦" : getInitials(msg.displayName)}
                   </div>
                 )}
-
                 <div className="msg-content">
                   {!isMe && (
                     <div className="msg-meta">
@@ -904,7 +798,6 @@ export default function ChatApp() {
                       <span className="msg-time">{formatTime(msg.createdAt)}</span>
                     </div>
                   )}
-
                   {isEditing ? (
                     <div className="edit-wrap">
                       <textarea ref={editRef} className="edit-input" value={editText}
@@ -937,18 +830,15 @@ export default function ChatApp() {
                       {msg.edited && <span className="edited-label"> (edited)</span>}
                     </div>
                   )}
-
                   {isMe && !isEditing && <div className="msg-time-me">{formatTime(msg.createdAt)}</div>}
                 </div>
-
                 {isMe && (
                   <div className="msg-av me-av" style={{ background: bg, color: fg }}>{getInitials(user?.displayName)}</div>
                 )}
-
                 {canAct && hoveredId === msg.id && !isEditing && (
                   <div className={`msg-actions${isMe ? " act-left" : " act-right"}`}>
-                    {msg.type === "text" && <button className="act-btn" onClick={() => startEdit(msg)} title="Edit">✏️</button>}
-                    <button className="act-btn del" onClick={() => handleDelete(msg.id)} title="Delete">🗑️</button>
+                    {msg.type === "text" && <button className="act-btn" onClick={() => startEdit(msg)}>✏️</button>}
+                    <button className="act-btn del" onClick={() => handleDelete(msg.id)}>🗑️</button>
                   </div>
                 )}
               </div>
@@ -967,7 +857,6 @@ export default function ChatApp() {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input */}
         <div className="input-area">
           <input type="file" ref={fileRef} onChange={handleFileUpload} style={{ display: "none" }} accept="image/*,.pdf,.doc,.docx,.txt,.zip,.csv" />
           {recording ? (
@@ -982,7 +871,7 @@ export default function ChatApp() {
             </div>
           ) : (
             <>
-              <button className="attach-btn" onClick={() => fileRef.current.click()} disabled={uploading} title="Attach file">
+              <button className="attach-btn" onClick={() => fileRef.current.click()} disabled={uploading}>
                 {uploading ? <span className="spin" style={{ fontSize: 13 }}>◌</span>
                   : <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                 }
@@ -993,7 +882,7 @@ export default function ChatApp() {
                 ? <button className="send-btn" onClick={handleSend}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13M22 2L15 22l-4-9-9-4 20-7z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
-                : <button className="mic-btn" onClick={startRecording} title="Record voice message">
+                : <button className="mic-btn" onClick={startRecording}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
               }
@@ -1002,7 +891,6 @@ export default function ChatApp() {
         </div>
       </main>
 
-      {/* Image modal */}
       {imagePreview && (
         <div className="img-modal" onClick={() => setImagePreview(null)}>
           <img src={imagePreview} alt="preview" />
